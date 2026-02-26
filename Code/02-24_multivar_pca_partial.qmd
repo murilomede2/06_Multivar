@@ -72,8 +72,8 @@ Commonly not a "designed experiment" analysis, but an exploratory relationship a
 - Based on analysis goal:  
 
   - Decrease number of dimensions  ###PCA
-  - Create clusters  ###k-means
-  - Establish significant relationships among multiple predictors and an outcome.  ###Randon forest
+  - Create clusters  *k-means
+  - Establish significant relationships among multiple predictors and an outcome.  *Randon forest
 
 - Based on Y (outcome) existence:
     - Supervised  ###If you have a Y variable
@@ -88,9 +88,9 @@ Commonly not a "designed experiment" analysis, but an exploratory relationship a
 #| message: false
 #| warning: false
 
-install.packages("ggcorrplot")
-install.packages("factoextra")
-install.packages("ggpmisc")
+#install.packages("ggcorrplot")
+#install.packages("factoextra")
+#install.packages("ggpmisc")
 
 library(tidyverse)
 library(ggcorrplot)
@@ -231,7 +231,7 @@ Multicollinearity definition: more than two explanatory variables in a multiple 
 
 Multicollinearity is an issue because:  
 
-- Model estimates magnitude and direction (+ or -) can change for multicollinear variables compared to a non-multicollinear model.  
+- Model estimates (slopes of the models) magnitude and direction (+ or -) can change for multicollinear variables compared to a non-multicollinear model.  
   
 - Model estimates standard error are inflated, directly affecting p-values, estimate significance, and power.  
   
@@ -246,6 +246,8 @@ weather %>%
   geom_point() +
   geom_smooth(method="lm") +
   stat_correlation()
+
+##Flat linear model means uncorrelated.
 ```
 
 Two correlated variables:
@@ -256,12 +258,20 @@ weather %>%
   geom_point() +
   geom_smooth(method="lm")
 
+##Slope of the linear model shows how the 2 variables are highly correlated.
 ```
 
 Now let's fit some models with one or two uncorrelated and correlated variables explaining fiberstrength and see what happens.  
 
 ```{r strength ~ mean_dayl.s_Apr}
-lm_dayl.apr 
+
+## The "tidy" function will show all the information about the linear model.
+
+lm_dayl.apr <- lm(strength_gtex ~ mean_dayl.s_Apr,
+                  data = weather) %>%
+  tidy() %>%
+  filter(term != "(Intercept)") %>%
+  mutate(mod = "lm_dayl.apr")
 
 lm_dayl.apr
 
@@ -278,6 +288,8 @@ lm_prp.oct
 ```
 
 ```{r strength ~ mean_dayl.s_Apr + sum_prcp.mm_Oct}
+## Apr and Oct are very uncorrelated.
+
 lm_dayl.prcp <- lm(strength_gtex ~ mean_dayl.s_Apr + 
                    sum_prcp.mm_Oct,
    data = weather) %>%
@@ -290,6 +302,8 @@ lm_dayl.prcp
 ```
 
 ```{r strength ~ mean_dayl.s_Apr + mean_dayl.s_May}
+## Apr and May they are very correlated.
+
 lm_daylapr.daylmay <- lm(strength_gtex ~ mean_dayl.s_Apr + 
                   mean_dayl.s_May,
    data = weather) %>%
@@ -312,7 +326,13 @@ lm_dayl.apr %>%
                              "lm_2var.uncor",
                              "lm_2var.cor"))) %>%
   filter(term != "mean_dayl.s_May") %>%
-  ggplot(aes(x=mod))
+  ggplot(aes(x=mod)) +
+  geom_pointrange(aes(y = estimate,
+                      ymin = estimate - std.error,
+                      ymax = estimate + std.error
+                      )) +
+  facet_wrap(~term, scales = "free_y") +
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))
 
 ```
 
@@ -330,6 +350,11 @@ General rule of thumb:
 Let's check the variance inflation factor (VIF) of both uncorrelated and correlated models
 ```{r vif uncorrelated}
 # Uncorrelated
+
+vif(lm(strength_gtex ~ mean_dayl.s_Apr + 
+                   sum_prcp.mm_Oct,
+   data = weather))
+
 ```
 
 
@@ -365,7 +390,8 @@ Some analysis do the normalization for you (like PCA), and others don't (like k-
 
 Since both PCA and k-means only take numerical variables, let's select them now.  
 ```{r selecting only numerical vars}
-weather_n 
+weather_n <- weather %>%
+ dplyr::select(-year,-site,-strength_gtex)
 
 weather_n
 ```
@@ -400,14 +426,18 @@ knitr::include_graphics("https://miro.medium.com/v2/resize:fit:1200/1*V4H3Cu8qGr
 Let's run PCA for our weather data.  
 
 ```{r pca model}
-mod_pca 
+mod_pca <- prcomp(weather_n, scale. = T)
+
+summary(mod_pca)
 
 ```
 
 ## Choosing number of PCs  
 Based on scree plot (total variance):  
 ```{r pca checking number of components}
-# Scree plot
+# Scree plot =  visualize how many dimensions are explaining the variance of the weather data.
+
+fviz_eig(mod_pca,addlabels = T)
 
 ```
     
@@ -417,6 +447,13 @@ This indicates that original variables were correlated (as we expected).
 If wanted to use enough PCs to explain 70% of total variance, how many would we need?  
 ```{r PCs to explain 70pct variance}
 
+mod_pca %>%
+  get_eig() %>%
+  mutate(pc = 1:72) %>%
+  ggplot(aes(x = pc,
+             y= cumulative.variance.percent)) +
+  geom_bar(stat = "identity") +
+  geom_hline(yintercept = 70)
 
 ```
     
@@ -446,6 +483,11 @@ Which variables contributed most to PC1, regardless of direction?
 
 ```{r variables contributing to PC1}
 
+fviz_contrib(mod_pca,
+             choice = "var",
+             axes = 1
+             )
+
 ```
   
 Let's check the eigenvectors for both PCs 1 and 2 variables:  
@@ -465,6 +507,9 @@ Let's plot PC1 vs PC2 scores, look for any groupings.
 
 ```{r PC1 vs PC2}
 
+fviz_pca_ind(mod_pca,
+             label = F)
+
 ```
   
 Appears that some groups exist.  
@@ -481,18 +526,23 @@ Let's add the first 4 PCs to our original dataset and run a regression versus gr
 
 ```{r pca scores}
 # Extract first 4 PCs scores
-pca_scores 
+pca_scores <- mod_pca$x %>%
+  as.data.frame() %>%
+  dplyr::select(PC1:PC4)
 
 pca_scores
 ```
 
 ```{r pca regression}
 # Adding PCs 1-4 scores to original data set
-weather_postpca 
+weather_postpca <- weather %>%
+  bind_cols(pca_scores)
 
 # Regression of yield ~ PCs
 
-lm_pca 
+lm_pca <- lm(strength_gtex ~PC1 + PC2 + PC3 +PC4,
+             data = weather_postpca
+             )
 
 # Summary  
 summary(lm_pca)
@@ -500,12 +550,22 @@ summary(lm_pca)
 
 
 ```{r pca regression}
-# Checking VIF
+# Checking VIF =  see if the PCAs are uncorrelated or not, we want tha they are not.
+
+vif(lm_pca)
 
 ```
 
 ```{r pca regression plots}
 # Plotting strength vs PC1
+
+ggplot(data = weather_postpca,
+       aes(x = PC1,
+           y = strength_gtex
+           )
+       ) + 
+  geom_point() + 
+  geom_smooth(method = "lm")
 
 ```
 
